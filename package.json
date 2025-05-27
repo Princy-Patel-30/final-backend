@@ -1,0 +1,49 @@
+{
+  "name": "back-end",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "lint": "eslint . --ext .js",
+    "format": "prettier --write .",
+    "prepare": "husky",
+    "precommit": "lint-staged",
+    "dev": "nodemon Server.js",
+    "start": "node Server.js",
+    "build": "echo 'No build step yet'"
+  },
+  "lint-staged": {
+    "*.{js,json}": [
+      "eslint --fix",
+      "prettier --write"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Princy-Patel-30/final-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Princy-Patel-30/final-backend/issues"
+  },
+  "homepage": "https://github.com/Princy-Patel-30/final-backend#readme",
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.27.0",
+    "eslint": "^9.27.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.2.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
+    "prettier": "^3.5.3"
+  }
+}
