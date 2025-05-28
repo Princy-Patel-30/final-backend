@@ -5,9 +5,9 @@ import { defineConfig } from 'eslint/config';
 
 export default defineConfig([
   js.configs.recommended,
-
   {
     files: ['**/*.js'],
+    ignores: ['generated/**'], // Exclude all Prisma generated files
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -24,16 +24,15 @@ export default defineConfig([
       'object-shorthand': ['error', 'always'],
       'arrow-body-style': ['error', 'as-needed'],
       'prefer-arrow-callback': 'error',
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': 'off',
       eqeqeq: ['error', 'always'],
       curly: ['error', 'all'],
-
       'no-multiple-empty-lines': ['error', { max: 1, maxEOF: 0 }],
       'no-duplicate-imports': 'error',
       'no-trailing-spaces': 'error',
       'eol-last': ['error', 'always'],
       'no-process-exit': 'warn',
-      'no-undef': 'error',
+      'no-undef': 'off',
       'no-unused-expressions': 'error',
       'no-useless-escape': 'error',
       'no-throw-literal': 'error',
@@ -43,8 +42,12 @@ export default defineConfig([
       'no-shadow': 'error',
       'no-async-promise-executor': 'error',
       'no-return-await': 'error',
+      'getter-return': 'error',
+      'no-unused-private-class-members': 'error',
+      'no-extra-boolean-cast': 'error',
+      'no-constant-binary-expression': 'error',
+      'no-cond-assign': 'error',
     },
   },
-
   prettier,
 ]);

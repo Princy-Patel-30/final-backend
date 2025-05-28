@@ -1,13 +1,8 @@
-import express from 'express';
-const app = express();
-const port = 3000;
+import env from './Config/env.js';
+import app from './App.js';
 
-app.use(express.json());
+const PORT = env.PORT || 3000;
 
-app.get('/', (req, res) => {
-  res.send('Hello, World!');
-});
-
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
+app.listen(PORT, () => {
+  console.log(`Server is running at ${env.BASE_URL}`);
 });
