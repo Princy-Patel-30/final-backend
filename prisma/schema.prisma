@@ -8,11 +8,200 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
 model User {
+  id                String           @id @default(uuid())
+  name              String           @unique
+  email             String           @unique
+  password          String
+  bio               String?
+  avatarUrl         String?
+  isActive          Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+
+  posts             Post[]
+  comments          Comment[]
+  likes             Like[]
+  commentLikes      CommentLike[]
+  savedPosts        SavedPost[]
+  messages          Message[]
+  resetTokens       ResetToken[]
+  activationTokens  ActivationToken[]
+  tokens            Token[]
+  following         Follow[]         @relation("Following")
+  followers         Follow[]         @relation("Followers")
+  chatParticipants  ChatParticipant[]
+
+  @@index([email])
+  @@index([name])
+}
+
+model Post {
+  id        String     @id @default(uuid())
+  userId    String
+  content   String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id])
+  comments  Comment[]
+  likes     Like[]
+  savedBy   SavedPost[]
+  media     Media[]
+
+  @@index([userId])
+}
+
+model Media {
+  id        String     @id @default(uuid())
+  url       String
+  type      MediaType
+  postId    String
+
+  post      Post       @relation(fields: [postId], references: [id])
+
+  @@index([postId])
+}
+
+model Comment {
+  id            String        @id @default(uuid())
+  postId        String
+  userId        String
+  content       String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  post          Post          @relation(fields: [postId], references: [id])
+  user          User          @relation(fields: [userId], references: [id])
+  commentLikes  CommentLike[]
+
+  @@index([postId])
+  @@index([userId])
+}
+
+model Like {
   id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  isActive  Boolean  @default(false) 
+  userId    String
+  postId    String
   createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+  post      Post     @relation(fields: [postId], references: [id])
+
+  @@unique([userId, postId])
+}
+
+model CommentLike {
+  id         String   @id @default(uuid())
+  commentId  String
+  userId     String
+  createdAt  DateTime @default(now())
+
+  comment    Comment  @relation(fields: [commentId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([commentId, userId])
+  @@index([commentId])
+  @@index([userId])
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower    User     @relation("Followers", fields: [followerId], references: [id])
+  following   User     @relation("Following", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model SavedPost {
+  id        String   @id @default(uuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+  post      Post     @relation(fields: [postId], references: [id])
+
+  @@unique([userId, postId])
+  @@index([userId])
+}
+
+model Chat {
+  id           String            @id @default(uuid())
+  createdAt    DateTime          @default(now())
+  participants ChatParticipant[]
+  messages     Message[]
+}
+
+model ChatParticipant {
+  id     String @id @default(uuid())
+  chatId String
+  userId String
+
+  chat   Chat   @relation(fields: [chatId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([chatId, userId])
+  @@index([chatId])
+  @@index([userId])
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  chatId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  chat      Chat     @relation(fields: [chatId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([chatId])
+  @@index([userId])
+}
+
+model Token {
+  id           String   @id @default(uuid())
+  userId       String
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ActivationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }

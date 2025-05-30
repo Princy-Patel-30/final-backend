@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { sendActivationEmail, sendPasswordResetEmail } from '../Utils/mailer.js';
-import { generateToken, verifyToken } from '../Utils/jwt.js';
+import { generateToken, setAuthCookies, storeRefreshToken, storeActivationToken, storeResetToken, verifyToken, getTokenExpiration } from '../Utils/jwt.js';
 import prisma from '../Config/db.js';
 import env from '../Config/env.js';
 import { isValidEmail, isValidUsername, isStrongPassword } from '../Helper/Regex.js';
@@ -50,8 +50,10 @@ export const register = async (req, res) => {
     });
 
     const token = generateToken({ id: user.id }, 'activation');
-    const activationLink = `${env.CLIENT_URL}/activate/${token}`;
+    const expiresAt = getTokenExpiration('activation');
+    await storeActivationToken(user.id, token, expiresAt);
 
+    const activationLink = `${env.CLIENT_URL}/activate/${token}`;
     await sendActivationEmail(email, activationLink);
 
     res.status(201).json({
@@ -87,17 +89,19 @@ export const activateAccount = async (req, res) => {
 // Login
 export const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    const { loginId, password } = req.body;
+    if (!loginId || !password) {
+      return res.status(400).json({ error: 'Username or email and password are required' });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email },
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [{ email: loginId }, { name: loginId }],
+      },
     });
 
     if (!user) {
-      return res.status(401).json({ error: 'Invalid email' });
+      return res.status(401).json({ error: 'Invalid username or email' });
     }
     if (!user.isActive) {
       return res.status(403).json({ error: 'Account not activated. Please check your email.' });
@@ -110,18 +114,19 @@ export const login = async (req, res) => {
 
     const accessToken = generateToken({ id: user.id }, 'access');
     const refreshToken = generateToken({ id: user.id }, 'refresh');
+    const expiresAt = getTokenExpiration('refresh');
+
+    await storeRefreshToken(user.id, refreshToken, expiresAt);
+    setAuthCookies(res, accessToken, refreshToken);
 
     res.status(200).json({
       message: 'Login successful',
-      accessToken,
-      refreshToken,
       user: { id: user.id, name: user.name, email: user.email },
     });
   } catch (_err) {
     res.status(500).json({ error: `Login failed: ${_err.message}` });
   }
 };
-
 // Forgot Password
 export const forgotPassword = async (req, res) => {
   try {
@@ -134,8 +139,10 @@ export const forgotPassword = async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const token = generateToken({ id: user.id }, 'reset');
-    const resetLink = `${env.CLIENT_URL}/reset-password/${token}`;
+    const expiresAt = getTokenExpiration('reset');
+    await storeResetToken(user.id, token, expiresAt);
 
+    const resetLink = `${env.CLIENT_URL}/reset-password/${token}`;
     await sendPasswordResetEmail(email, resetLink);
 
     res.status(200).json({ message: 'Reset link sent to your email' });
@@ -184,10 +191,62 @@ export const resetPassword = async (req, res) => {
 };
 
 // Logout
+// Logout
 export const logout = async (req, res) => {
   try {
+    const { refreshToken } = req.cookies;
+    if (refreshToken) {
+      // Delete refresh token from database
+      await prisma.token.deleteMany({
+        where: { refreshToken },
+      });
+    }
+
+    // Clear both cookies
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
     res.status(200).json({ message: 'Logout successful' });
   } catch (_err) {
     res.status(500).json({ error: `Logout failed: ${_err.message}` });
+  }
+};
+
+export const refreshAccessToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.cookies;
+    if (!refreshToken) {
+      return res.status(401).json({ error: 'Refresh token not found' });
+    }
+
+    // Verify refresh token
+    const { id } = verifyToken(refreshToken, 'refresh');
+
+    // Check if refresh token exists in the database
+    const storedToken = await prisma.token.findFirst({
+      where: {
+        refreshToken,
+        userId: id,
+        expiresAt: { gte: new Date() }, // Ensure token hasn't expired
+      },
+    });
+
+    if (!storedToken) {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    // Generate new access token
+    const newAccessToken = generateToken({ id }, 'access');
+
+    // Update access token cookie
+    res.cookie('accessToken', newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 1000 * 60 * 15, // 15 minutes
+    });
+
+    res.status(200).json({ message: 'Access token refreshed successfully' });
+  } catch (_err) {
+    res.status(401).json({ error: 'Invalid or expired refresh token' });
   }
 };
