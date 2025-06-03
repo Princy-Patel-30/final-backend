@@ -116,7 +116,7 @@ export const searchUsers = async (query = '', page = 1, limit = 10) => {
     return aPriority - bPriority;
   });
   
-  // Apply pagination to sorted results
+ 
   const startIndex = (page - 1) * limit;
   const paginatedUsers = sortedUsers.slice(startIndex, startIndex + limit);
   
@@ -126,17 +126,13 @@ export const searchUsers = async (query = '', page = 1, limit = 10) => {
   };
 };
 
-// Toggle follow by username (updated to work with username parameter)
-export const toggleFollowByUsername = async (followerId, username) => {
-  // Find the user to follow by username
+export const followUserByUsername = async (followerId, username) => {
   const targetUser = await prisma.user.findUnique({
     where: { name: username },
-    select: { id: true, name: true }
+    select: { id: true, name: true },
   });
-  
+
   if (!targetUser) throw new Error('User to follow does not exist');
-  
-  // Prevent self-following
   if (followerId === targetUser.id) throw new Error("Can't follow yourself");
 
   const existingFollow = await prisma.follow.findUnique({
@@ -149,65 +145,53 @@ export const toggleFollowByUsername = async (followerId, username) => {
   });
 
   if (existingFollow) {
-    await prisma.follow.delete({
-      where: {
-        followerId_followingId: {
-          followerId,
-          followingId: targetUser.id,
-        },
-      },
-    });
-    return { followed: false, targetUser: targetUser.name };
-  } else {
-    await prisma.follow.create({
-      data: {
-        followerId,
-        followingId: targetUser.id,
-      },
-    });
-    return { followed: true, targetUser: targetUser.name };
+    throw new Error('Already following this user');
   }
+
+  await prisma.follow.create({
+    data: {
+      followerId,
+      followingId: targetUser.id,
+    },
+  });
+
+  return { followed: true, targetUser: targetUser.name };
 };
 
-// Original toggle follow (kept for backward compatibility)
-export const toggleFollow = async (followerId, followingId) => {
-  if (followerId === followingId) throw new Error("Can't follow yourself");
+export const unfollowUserByUsername = async (followerId, username) => {
+  const targetUser = await prisma.user.findUnique({
+    where: { name: username },
+    select: { id: true, name: true },
+  });
 
-  // Check if the user to follow exists
-  const targetUser = await prisma.user.findUnique({ where: { id: followingId } });
-  if (!targetUser) throw new Error('User to follow does not exist');
+  if (!targetUser) throw new Error('User to unfollow does not exist');
+  if (followerId === targetUser.id) throw new Error("Can't unfollow yourself");
 
   const existingFollow = await prisma.follow.findUnique({
     where: {
       followerId_followingId: {
         followerId,
-        followingId,
+        followingId: targetUser.id,
       },
     },
   });
 
-  if (existingFollow) {
-    await prisma.follow.delete({
-      where: {
-        followerId_followingId: {
-          followerId,
-          followingId,
-        },
-      },
-    });
-    return { followed: false };
-  } else {
-    await prisma.follow.create({
-      data: {
-        followerId,
-        followingId,
-      },
-    });
-    return { followed: true };
+  if (!existingFollow) {
+    throw new Error('You are not following this user');
   }
+
+  await prisma.follow.delete({
+    where: {
+      followerId_followingId: {
+        followerId,
+        followingId: targetUser.id,
+      },
+    },
+  });
+
+  return { unfollowed: true, targetUser: targetUser.name };
 };
 
-// Get followers list with pagination info
 export const getFollowers = async (username, page = 1, limit = 10) => {
   const user = await prisma.user.findUnique({ where: { name: username } });
   if (!user) throw new Error('User not found');

@@ -40,21 +40,32 @@ export const searchUsers = async (req, res) => {
   }
 };
 
-// Updated toggle follow to work with username parameter
-export const toggleFollow = async (req, res) => {
+export const follow = async (req, res) => {
   try {
-    const { id } = req.user; // follower ID from JWT
-    const { username } = req.params; // username from URL parameter
-    
-    console.log('Toggle follow:', { followerId: id, username }); // Debug log
-    
-    const result = await profileService.toggleFollowByUsername(id, username);
+    const { id } = req.user;
+    const { username } = req.params;
+
+    const result = await profileService.followUserByUsername(id, username);
     res.json(result);
   } catch (err) {
-    console.error('Toggle follow error:', err);
+    console.error('Follow error:', err);
     res.status(400).json({ error: err.message });
   }
 };
+
+export const unfollow = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { username } = req.params;
+
+    const result = await profileService.unfollowUserByUsername(id, username);
+    res.json(result);
+  } catch (err) {
+    console.error('Unfollow error:', err);
+    res.status(400).json({ error: err.message });
+  }
+};
+
 
 export const getFollowers = async (req, res) => {
   try {

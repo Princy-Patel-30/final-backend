@@ -5,7 +5,8 @@ import {
   searchUsers,
   getFollowers,
   getFollowing,
-  toggleFollow,
+  follow,
+  unfollow,
 } from '../Controller/profile.controller.js';
 import { authenticateToken } from '../Middleware/auth.middleware.js';
 import upload from '../Middleware/multer.js';
@@ -29,6 +30,8 @@ router.get('/:username/followers', getFollowers);
 router.get('/:username/following', getFollowing);
 
 // Follow or unfollow a user by username
-router.post('/:username/follow', authenticateToken, toggleFollow);
+router.post('/:username/follow', authenticateToken, follow);
+
+router.post('/:username/unfollow',authenticateToken, unfollow )
 
 export default router;
