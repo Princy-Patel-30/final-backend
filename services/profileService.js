@@ -3,19 +3,23 @@ import { uploadBufferToCloudinary } from '../Utils/uploadtocloudinary.js';
 
 // Get user profile by username
 export const getProfileByUsername = async (username) => {
-  return prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: { name: username },
     select: {
       id: true,
       name: true,
       avatarUrl: true,
       bio: true,
+      createdAt: true,
       posts: {
         select: {
           id: true,
           content: true,
           createdAt: true,
           media: true,
+          _count: {
+            select: { likes: true, comments: true },
+          },
         },
         orderBy: { createdAt: 'desc' },
       },
@@ -28,13 +32,25 @@ export const getProfileByUsername = async (username) => {
       },
     },
   });
+  if (!user) throw new Error('User not found');
+  return user;
 };
 
-// Update user info (name, bio)
-export const updateUserInfo = async (userId, { name, bio }) => {
+// Update user profile (name, bio, avatar)
+export const updateUserProfile = async (userId, { name, bio, fileBuffer }) => {
+  let avatarUrl;
+  if (fileBuffer) {
+    const result = await uploadBufferToCloudinary(fileBuffer, 'avatars');
+    avatarUrl = result.secure_url;
+  }
+
   return prisma.user.update({
     where: { id: userId },
-    data: { name, bio },
+    data: {
+      name,
+      bio,
+      ...(avatarUrl && { avatarUrl }),
+    },
     select: {
       id: true,
       name: true,
@@ -44,25 +60,124 @@ export const updateUserInfo = async (userId, { name, bio }) => {
   });
 };
 
-// Update user avatar
-export const updateUserAvatar = async (userId, fileBuffer) => {
-  const result = await uploadBufferToCloudinary(fileBuffer, 'avatars');
-  return prisma.user.update({
-    where: { id: userId },
-    data: { avatarUrl: result.secure_url },
+// Search users by name or bio with PRIORITY ORDERING
+export const searchUsers = async (query = '', page = 1, limit = 10) => {
+  if (!query || query.trim() === '') {
+    return {
+      usersfound: 0,
+      users: []
+    };
+  }
+  
+  const trimmedQuery = query.trim().toLowerCase();
+  
+  // Get all matching users without pagination first
+  const allUsers = await prisma.user.findMany({
+    where: {
+      OR: [
+        { name: { contains: query.trim(), mode: 'insensitive' } },
+        { bio: { contains: query.trim(), mode: 'insensitive' } },
+      ],
+    },
     select: {
       id: true,
       name: true,
-      bio: true,
       avatarUrl: true,
+      bio: true,
     },
   });
+  
+  // Sort by priority:
+  // 1. Name starts with query (highest priority)
+  // 2. Bio starts with query  
+  // 3. Name contains query
+  // 4. Bio contains query (lowest priority)
+  const sortedUsers = allUsers.sort((a, b) => {
+    // Priority scoring
+    const getPriority = (user) => {
+      const nameLower = user.name.toLowerCase();
+      const bioLower = (user.bio || '').toLowerCase();
+      
+      if (nameLower.startsWith(trimmedQuery)) return 1; // Highest priority
+      if (bioLower.startsWith(trimmedQuery)) return 2;
+      if (nameLower.includes(trimmedQuery)) return 3;
+      if (bioLower.includes(trimmedQuery)) return 4; // Lowest priority
+      return 5;
+    };
+    
+    const aPriority = getPriority(a);
+    const bPriority = getPriority(b);
+    
+    // If same priority, sort alphabetically by name
+    if (aPriority === bPriority) {
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    }
+    
+    return aPriority - bPriority;
+  });
+  
+  // Apply pagination to sorted results
+  const startIndex = (page - 1) * limit;
+  const paginatedUsers = sortedUsers.slice(startIndex, startIndex + limit);
+  
+  return {
+    usersfound: sortedUsers.length,
+    users: paginatedUsers
+  };
 };
 
-// Follow a user
-export const followUser = async (followerId, followingId) => {
+// Toggle follow by username (updated to work with username parameter)
+export const toggleFollowByUsername = async (followerId, username) => {
+  // Find the user to follow by username
+  const targetUser = await prisma.user.findUnique({
+    where: { name: username },
+    select: { id: true, name: true }
+  });
+  
+  if (!targetUser) throw new Error('User to follow does not exist');
+  
+  // Prevent self-following
+  if (followerId === targetUser.id) throw new Error("Can't follow yourself");
+
+  const existingFollow = await prisma.follow.findUnique({
+    where: {
+      followerId_followingId: {
+        followerId,
+        followingId: targetUser.id,
+      },
+    },
+  });
+
+  if (existingFollow) {
+    await prisma.follow.delete({
+      where: {
+        followerId_followingId: {
+          followerId,
+          followingId: targetUser.id,
+        },
+      },
+    });
+    return { followed: false, targetUser: targetUser.name };
+  } else {
+    await prisma.follow.create({
+      data: {
+        followerId,
+        followingId: targetUser.id,
+      },
+    });
+    return { followed: true, targetUser: targetUser.name };
+  }
+};
+
+// Original toggle follow (kept for backward compatibility)
+export const toggleFollow = async (followerId, followingId) => {
   if (followerId === followingId) throw new Error("Can't follow yourself");
-  const existing = await prisma.follow.findUnique({
+
+  // Check if the user to follow exists
+  const targetUser = await prisma.user.findUnique({ where: { id: followingId } });
+  if (!targetUser) throw new Error('User to follow does not exist');
+
+  const existingFollow = await prisma.follow.findUnique({
     where: {
       followerId_followingId: {
         followerId,
@@ -70,39 +185,38 @@ export const followUser = async (followerId, followingId) => {
       },
     },
   });
-  if (existing) return { followed: false };
-  await prisma.follow.create({
-    data: { followerId, followingId },
-  });
-  return { followed: true };
+
+  if (existingFollow) {
+    await prisma.follow.delete({
+      where: {
+        followerId_followingId: {
+          followerId,
+          followingId,
+        },
+      },
+    });
+    return { followed: false };
+  } else {
+    await prisma.follow.create({
+      data: {
+        followerId,
+        followingId,
+      },
+    });
+    return { followed: true };
+  }
 };
 
-// Unfollow a user
-export const unfollowUser = async (followerId, followingId) => {
-  const existing = await prisma.follow.findUnique({
-    where: {
-      followerId_followingId: {
-        followerId,
-        followingId,
-      },
-    },
-  });
-  if (!existing) return { followed: false };
-  await prisma.follow.delete({
-    where: {
-      followerId_followingId: {
-        followerId,
-        followingId,
-      },
-    },
-  });
-  return { followed: false };
-};
-
-// Get followers with pagination
+// Get followers list with pagination info
 export const getFollowers = async (username, page = 1, limit = 10) => {
   const user = await prisma.user.findUnique({ where: { name: username } });
   if (!user) throw new Error('User not found');
+
+  // Get total count for pagination
+  const totalFollowers = await prisma.follow.count({
+    where: { followingId: user.id }
+  });
+
   const followers = await prisma.follow.findMany({
     where: { followingId: user.id },
     include: {
@@ -116,14 +230,23 @@ export const getFollowers = async (username, page = 1, limit = 10) => {
     },
     skip: (page - 1) * limit,
     take: limit,
+    orderBy: { createdAt: 'desc' }
   });
-  return followers.map(f => f.follower);
+
+  return {
+     totalFollowers,followers: followers.map(f => f.follower)};
 };
 
-// Get following with pagination
+// Get following list with pagination info
 export const getFollowing = async (username, page = 1, limit = 10) => {
   const user = await prisma.user.findUnique({ where: { name: username } });
   if (!user) throw new Error('User not found');
+
+  // Get total count for pagination
+  const totalFollowing = await prisma.follow.count({
+    where: { followerId: user.id }
+  });
+
   const following = await prisma.follow.findMany({
     where: { followerId: user.id },
     include: {
@@ -137,26 +260,9 @@ export const getFollowing = async (username, page = 1, limit = 10) => {
     },
     skip: (page - 1) * limit,
     take: limit,
+    orderBy: { createdAt: 'desc' }
   });
-  return following.map(f => f.following);
-};
 
-// Search users
-export const searchUsers = async (query = '', page = 1, limit = 10) => {
-  return prisma.user.findMany({
-    where: {
-      OR: [
-        { name: { contains: query, mode: 'insensitive' } },
-        { bio: { contains: query, mode: 'insensitive' } },
-      ],
-    },
-    select: {
-      id: true,
-      name: true,
-      avatarUrl: true,
-    },
-    skip: (page - 1) * limit,
-    take: limit,
-    orderBy: { name: 'asc' },
-  });
+  return {
+    totalFollowing,following: following.map(f => f.following)};
 };
