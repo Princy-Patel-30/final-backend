@@ -1,10 +1,11 @@
 import prisma from '../Config/db.js';
 import { uploadBufferToCloudinary } from '../Utils/uploadtocloudinary.js';
 
-// Get user profile by username
-export const getProfileByUsername = async (username) => {
+// Get user profile by user ID
+// Get user profile by user ID
+export const getProfileById = async (userId, currentUserId = null) => {
   const user = await prisma.user.findUnique({
-    where: { name: username },
+    where: { id: userId },
     select: {
       id: true,
       name: true,
@@ -17,12 +18,121 @@ export const getProfileByUsername = async (username) => {
           content: true,
           createdAt: true,
           media: true,
-          _count: {
-            select: { likes: true, comments: true },
-          },
+          _count: { select: { likes: true, comments: true } },
         },
         orderBy: { createdAt: 'desc' },
       },
+      _count: { select: { posts: true, followers: true, following: true } },
+      // Add isFollowing field if currentUserId is provided
+      ...(currentUserId && {
+        followers: {
+          where: { followerId: currentUserId },
+          select: { followerId: true },
+        },
+      }),
+    },
+  });
+  if (!user) throw new Error('User not found');
+  return {
+    ...user,
+    isFollowing: currentUserId ? !!user.followers?.length : false,
+  };
+};
+
+// Search users by name or bio
+export const searchUsers = async (query = '', page = 1, limit = 10, currentUserId = null) => {
+  if (!Number.isInteger(page) || page < 1) throw new Error('Invalid page number');
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('Invalid limit value');
+
+  if (!query || query.trim() === '') {
+    return { usersfound: 0, users: [] };
+  }
+
+  const trimmedQuery = query.trim();
+
+  const users = await prisma.user.findMany({
+    where: {
+      OR: [
+        { name: { contains: trimmedQuery, mode: 'insensitive' } },
+        { bio: { contains: trimmedQuery, mode: 'insensitive' } },
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      bio: true,
+      avatarUrl: true,
+      email: true,
+      // Add isFollowing field
+      followers: currentUserId
+        ? {
+            where: { followerId: currentUserId },
+            select: { followerId: true },
+          }
+        : false,
+    },
+    skip: (page - 1) * limit,
+    take: limit,
+    orderBy: { name: 'asc' },
+  });
+
+  return {
+    usersfound: users.length,
+    users: users.map((user) => ({
+      ...user,
+      isFollowing: currentUserId ? !!user.followers?.length : false,
+    })),
+  };
+};
+// Update user profile
+export const updateUserProfile = async (userId, { name, bio, avatarUrl, fileBuffer }) => {
+  let uploadedAvatarUrl;
+
+  if (fileBuffer) {
+    const result = await uploadBufferToCloudinary(fileBuffer, 'avatars');
+    uploadedAvatarUrl = result.secure_url;
+  }
+
+  if (name) {
+    const existingUser = await prisma.user.findUnique({
+      where: { name },
+      select: { id: true },
+    });
+
+    if (existingUser && existingUser.id !== userId) {
+      throw new Error('Username already exists');
+    }
+  }
+
+  if (avatarUrl && !fileBuffer) {
+    try {
+      new URL(avatarUrl);
+      if (!avatarUrl.startsWith('https://res.cloudinary.com/')) {
+        throw new Error('Avatar URL must be from Cloudinary');
+      }
+    } catch {
+      throw new Error('Invalid avatar URL format');
+    }
+  }
+
+  const updateData = {};
+  if (name !== undefined) updateData.name = name;
+  if (bio !== undefined) updateData.bio = bio;
+  if (uploadedAvatarUrl) {
+    updateData.avatarUrl = uploadedAvatarUrl;
+  } else if (avatarUrl !== undefined) {
+    updateData.avatarUrl = avatarUrl;
+  }
+
+  return prisma.user.update({
+    where: { id: userId },
+    data: updateData,
+    select: {
+      id: true,
+      name: true,
+      bio: true,
+      avatarUrl: true,
+      email: true,
       _count: {
         select: {
           posts: true,
@@ -32,140 +142,55 @@ export const getProfileByUsername = async (username) => {
       },
     },
   });
-  if (!user) throw new Error('User not found');
-  return user;
 };
 
-// Update user profile (name, bio, avatar)
-export const updateUserProfile = async (userId, { name, bio, fileBuffer }) => {
-  let avatarUrl;
-  if (fileBuffer) {
-    const result = await uploadBufferToCloudinary(fileBuffer, 'avatars');
-    avatarUrl = result.secure_url;
+
+
+// Follow a user by ID
+export const followUser = async (followerId, followingId) => {
+  if (followerId === followingId) {
+    throw new Error("Can't follow yourself");
   }
-
-  return prisma.user.update({
-    where: { id: userId },
-    data: {
-      name,
-      bio,
-      ...(avatarUrl && { avatarUrl }),
-    },
-    select: {
-      id: true,
-      name: true,
-      bio: true,
-      avatarUrl: true,
-    },
-  });
-};
-
-// Search users by name or bio with PRIORITY ORDERING
-export const searchUsers = async (query = '', page = 1, limit = 10) => {
-  if (!query || query.trim() === '') {
-    return {
-      usersfound: 0,
-      users: []
-    };
-  }
-  
-  const trimmedQuery = query.trim().toLowerCase();
-  
-  // Get all matching users without pagination first
-  const allUsers = await prisma.user.findMany({
-    where: {
-      OR: [
-        { name: { contains: query.trim(), mode: 'insensitive' } },
-        { bio: { contains: query.trim(), mode: 'insensitive' } },
-      ],
-    },
-    select: {
-      id: true,
-      name: true,
-      avatarUrl: true,
-      bio: true,
-    },
-  });
-  
-  // Sort by priority:
-  // 1. Name starts with query (highest priority)
-  // 2. Bio starts with query  
-  // 3. Name contains query
-  // 4. Bio contains query (lowest priority)
-  const sortedUsers = allUsers.sort((a, b) => {
-    // Priority scoring
-    const getPriority = (user) => {
-      const nameLower = user.name.toLowerCase();
-      const bioLower = (user.bio || '').toLowerCase();
-      
-      if (nameLower.startsWith(trimmedQuery)) return 1; // Highest priority
-      if (bioLower.startsWith(trimmedQuery)) return 2;
-      if (nameLower.includes(trimmedQuery)) return 3;
-      if (bioLower.includes(trimmedQuery)) return 4; // Lowest priority
-      return 5;
-    };
-    
-    const aPriority = getPriority(a);
-    const bPriority = getPriority(b);
-    
-    // If same priority, sort alphabetically by name
-    if (aPriority === bPriority) {
-      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-    }
-    
-    return aPriority - bPriority;
-  });
-  
- 
-  const startIndex = (page - 1) * limit;
-  const paginatedUsers = sortedUsers.slice(startIndex, startIndex + limit);
-  
-  return {
-    usersfound: sortedUsers.length,
-    users: paginatedUsers
-  };
-};
-
-export const followUserByUsername = async (followerId, username) => {
-  const targetUser = await prisma.user.findUnique({
-    where: { name: username },
-    select: { id: true, name: true },
-  });
-
-  if (!targetUser) throw new Error('User to follow does not exist');
-  if (followerId === targetUser.id) throw new Error("Can't follow yourself");
 
   const existingFollow = await prisma.follow.findUnique({
     where: {
       followerId_followingId: {
         followerId,
-        followingId: targetUser.id,
+        followingId,
       },
     },
   });
 
   if (existingFollow) {
-    throw new Error('Already following this user');
+    throw new Error('You are already following this user');
   }
 
-  await prisma.follow.create({
+  const newFollow = await prisma.follow.create({
     data: {
-      followerId,
-      followingId: targetUser.id,
+      follower: { connect: { id: followerId } },
+      following: { connect: { id: followingId } },
+    },
+    include: {
+      following: { select: { name: true } },
     },
   });
 
-  return { followed: true, targetUser: targetUser.name };
+  return { followed: true, targetUser: newFollow.following.name };
 };
 
-export const unfollowUserByUsername = async (followerId, username) => {
+// Unfollow a user by ID
+export const unfollowUser = async (followerId, followingId) => {
   const targetUser = await prisma.user.findUnique({
-    where: { name: username },
+    where: { id: followingId },
     select: { id: true, name: true },
   });
 
-  if (!targetUser) throw new Error('User to unfollow does not exist');
-  if (followerId === targetUser.id) throw new Error("Can't unfollow yourself");
+  if (!targetUser) {
+    throw new Error('User to unfollow does not exist');
+  }
+  if (followerId === targetUser.id) {
+    throw new Error("Can't unfollow yourself");
+  }
 
   const existingFollow = await prisma.follow.findUnique({
     where: {
@@ -192,17 +217,33 @@ export const unfollowUserByUsername = async (followerId, username) => {
   return { unfollowed: true, targetUser: targetUser.name };
 };
 
-export const getFollowers = async (username, page = 1, limit = 10) => {
-  const user = await prisma.user.findUnique({ where: { name: username } });
-  if (!user) throw new Error('User not found');
+// Get followers list with pagination
+export const getFollowers = async (userId, page = 1, limit = 10) => {
+  if (!userId || typeof userId !== 'string') {
+    throw new Error('Invalid user ID');
+  }
+  if (!Number.isInteger(page) || page < 1) {
+    throw new Error('Invalid page number');
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('Invalid limit value');
+  }
 
-  // Get total count for pagination
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, avatarUrl:true, name: true },
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
   const totalFollowers = await prisma.follow.count({
-    where: { followingId: user.id }
+    where: { followingId: userId },
   });
 
   const followers = await prisma.follow.findMany({
-    where: { followingId: user.id },
+    where: { followingId: userId },
     include: {
       follower: {
         select: {
@@ -214,25 +255,48 @@ export const getFollowers = async (username, page = 1, limit = 10) => {
     },
     skip: (page - 1) * limit,
     take: limit,
-    orderBy: { createdAt: 'desc' }
+    orderBy: { createdAt: 'desc' },
   });
 
+  const formattedFollowers = followers.map(f => ({
+    id:  f.follower.id,
+    name: f.follower.name,
+    avatarUrl: f.follower.avatarUrl || null,
+  }));
+
   return {
-     totalFollowers,followers: followers.map(f => f.follower)};
+    totalFollowers,
+    followers: formattedFollowers,
+  };
 };
 
-// Get following list with pagination info
-export const getFollowing = async (username, page = 1, limit = 10) => {
-  const user = await prisma.user.findUnique({ where: { name: username } });
-  if (!user) throw new Error('User not found');
+// Get following list with pagination
+export const getFollowing = async (userId, page = 1, limit = 10) => {
+  if (!userId || typeof userId !== 'string') {
+    throw new Error('Invalid user ID');
+  }
+  if (!Number.isInteger(page) || page < 1) {
+    throw new Error('Invalid page number');
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('Invalid limit value');
+  }
 
-  // Get total count for pagination
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, name: true },
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
   const totalFollowing = await prisma.follow.count({
-    where: { followerId: user.id }
+    where: { followerId: userId },
   });
 
   const following = await prisma.follow.findMany({
-    where: { followerId: user.id },
+    where: { followerId: userId },
     include: {
       following: {
         select: {
@@ -244,9 +308,17 @@ export const getFollowing = async (username, page = 1, limit = 10) => {
     },
     skip: (page - 1) * limit,
     take: limit,
-    orderBy: { createdAt: 'desc' }
+    orderBy: { createdAt: 'desc' },
   });
 
+  const formattedFollowing = following.map(f => ({
+    id: f.following.id,
+    name: f.following.name,
+    avatarUrl: f.following.avatarUrl || null,
+  }));
+
   return {
-    totalFollowing,following: following.map(f => f.following)};
+    totalFollowing,
+    following: formattedFollowing,
+  };
 };

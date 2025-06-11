@@ -13,25 +13,23 @@ import upload from '../Middleware/multer.js';
 
 const router = express.Router();
 
-// IMPORTANT: Put specific routes BEFORE parameterized routes
-// Search users by name or bio (moved to top)
+// Search users by name or bio
 router.get('/search', searchUsers);
 
 // Update logged-in user's profile (with optional avatar upload)
 router.put('/profile', authenticateToken, upload.single('avatar'), updateProfile);
 
-// Get user profile by username
-router.get('/:username', getUserProfile);
+// Get user profile by user ID
+router.get('/id/:id', getUserProfile);
 
-// Get followers of a user
-router.get('/:username/followers', getFollowers);
+// Get followers of a user by user ID
+router.get('/id/:id/followers', getFollowers);
 
-// Get users followed by a user
-router.get('/:username/following', getFollowing);
+// Get users followed by a user by user ID
+router.get('/id/:id/following', getFollowing);
 
-// Follow or unfollow a user by username
-router.post('/:username/follow', authenticateToken, follow);
-
-router.post('/:username/unfollow',authenticateToken, unfollow )
+// Follow or unfollow a user by user ID
+router.post('/id/:id/follow', authenticateToken, follow);
+router.post('/id/:id/unfollow', authenticateToken, unfollow);
 
 export default router;
