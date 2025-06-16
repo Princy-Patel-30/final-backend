@@ -1,7 +1,7 @@
-import * as chatService from '../Services/chatService.js';
+import * as chatService from '../services/chatService.js';
 import { io } from '../Server.js';
 
-// GET /api/chat - List all chats for the user
+
 export async function listChats(req, res) {
   try {
     const userId = req.user.id;
