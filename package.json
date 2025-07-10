@@ -9,7 +9,7 @@
     "prepare": "husky",
     "precommit": "lint-staged",
     "dev": "nodemon Server.js",
-    "start": "nodemon Server.js",
+    "start": "node Server.js",
     "build": "echo 'No build step yet'",
     "postinstall": "prisma generate"
   },
