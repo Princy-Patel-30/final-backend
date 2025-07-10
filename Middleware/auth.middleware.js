@@ -1,28 +1,37 @@
+  import { verifyToken } from '../Utils/jwt.js';
+  import { refreshAccessTokenService } from '../services/authService.js';
 
-import { verifyToken} from '../Utils/jwt.js';
-export const authenticateToken = async (req, res, next) => {
-  const { accessToken, refreshToken } = req.cookies;
-
-  if (!accessToken) {
-    if (!refreshToken) {
-      return res.status(401).json({ error: 'Access token and refresh token missing' });
-    }
+  export const authenticateToken = async (req, res, next) => {
+    const accessToken = req.cookies.accessToken;
+    const refreshToken = req.cookies.refreshToken;
 
     try {
-      const refreshResponse = await refreshAccessToken(req, res);
-      if (refreshResponse.status !== 200) {
-        return res.status(401).json({ error: 'Unable to refresh access token' });
-      }
+      // Attempt to verify the existing access token
+      const { id } = verifyToken(accessToken, 'access');
+      req.user = { id };
+      return next();
     } catch (_err) {
-      return res.status(401).json({ error: 'Invalid or expired refresh token' });
-    }
-  }
+      // Access token is missing or invalid; try refreshing it
+      if (!refreshToken) {
+        return res.status(401).json({ error: 'Access token and refresh token missing' });
+      }
 
-  try {
-    const { id } = verifyToken(req.cookies.accessToken, 'access');
-    req.user = { id };
-    next();
-  } catch (_err) {
-    return res.status(401).json({ error: 'Invalid or expired access token' });
-  }
-};
+      try {
+        // Generate a new access token using the refresh token
+        const newAccessToken = await refreshAccessTokenService(refreshToken);
+        // Set the new access token in the response cookies
+        res.cookie('accessToken', newAccessToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 1000 * 60 * 15, // 15 minutes
+        });
+        // Verify the new access token
+        const { id } = verifyToken(newAccessToken, 'access');
+        req.user = { id };
+        return next();
+      } catch (refreshErr) {
+        return res.status(401).json({ error: 'Invalid or expired refresh token' });
+      }
+    }
+  };

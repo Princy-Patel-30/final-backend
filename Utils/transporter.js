@@ -13,7 +13,8 @@ const transporter = nodemailer.createTransport({
 
 transporter.verify((error) => {
   if (error) {
-    console.error('Email transporter error:', error);
+    console.error('Email transporter error:', error.message);
+     console.error('Check your network connection, SMTP credentials, and firewall settings.');
   } else {
     console.log('Email transporter is ready');
   }
