@@ -10,7 +10,8 @@
     "precommit": "lint-staged",
     "dev": "nodemon Server.js",
     "start": "nodemon Server.js",
-    "build": "echo 'No build step yet'"
+    "build": "echo 'No build step yet'",
+    "postinstall": "prisma generate"
   },
   "lint-staged": {
     "*.{js,json}": [
